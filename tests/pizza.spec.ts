@@ -173,14 +173,16 @@ async function basicInit(page: Page) {
     });
   });
 
-  await page.route('*/**/api/order/verify', async (route) => {
-    await route.fulfill({
-      json: {
-        message: 'valid',
-        payload: 'This pizza is authentic.',
-      },
-    });
+  await page.route(/\/api\/order\/verify(?:\?.*)?$/, async (route) => {
+  expect(route.request().method()).toBe('POST');
+
+  await route.fulfill({
+    json: {
+      message: 'valid',
+      payload: 'This pizza is authentic.',
+    },
   });
+});
 
   await page.route('*/**/api/docs', async (route) => {
     await route.fulfill({
@@ -246,7 +248,7 @@ test('purchase with login', async ({ page }) => {
   await expect(page).toHaveURL(/delivery/);
 
   await page.getByRole('button', { name: 'Verify' }).click();
-  await expect(page.getByText('valid')).toBeVisible();
+  await expect(page.locator('#hs-jwt-modal h3 span')).toHaveText('valid');
 });
 
 test('register', async ({ page }) => {
