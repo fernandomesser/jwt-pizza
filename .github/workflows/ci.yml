@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build
+    name: Build and Test
     runs-on: ubuntu-latest
 
     steps:
@@ -19,6 +19,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22.x"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Set version
         id: set_version
@@ -27,9 +31,23 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           printf '{"version": "%s" }' "$version" > public/version.json
 
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run UI tests and coverage
+        run: npm run test:coverage
+
+      - name: Update coverage badge
+        run: |
+          coverage=$(jq '.total.lines.pct' coverage/coverage-summary.json)
+          color=$(echo "$coverage < 80" | bc | awk '{if ($1) print "red"; else print "green"}')
+
+          curl -s -X POST \
+            "https://pizza-factory.cs329.click/api/badge/${{ secrets.NET_ID }}/jwtpizzacoverage?label=Coverage&value=$coverage%25&color=$color" \
+            -H "authorization: bearer ${{ secrets.FACTORY_API_KEY }}"
+
       - name: Build
         run: |
-          npm ci
           npm run build
           cp dist/index.html dist/404.html
 
