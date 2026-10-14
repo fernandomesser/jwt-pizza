@@ -68,6 +68,37 @@ async function basicInit(page: Page) {
     await route.fulfill({ json: loggedInUser });
   });
 
+  await page.route('*/**/api/user/3', async (route) => {
+    if (route.request().method() === 'PUT') {
+      const request = route.request().postDataJSON();
+      const oldEmail = loggedInUser?.email;
+      const password = request.password || users[oldEmail || '']?.password;
+      if (oldEmail && oldEmail !== request.email) delete users[oldEmail];
+      users[request.email] = { ...request, password, roles: [{ role: Role.Diner }] };
+      loggedInUser = { id: request.id, name: request.name, email: request.email, roles: [{ role: Role.Diner }] };
+      await route.fulfill({ json: { user: loggedInUser, token: 'updated-token' } });
+      return;
+    }
+    await route.continue();
+  });
+
+  let listedUsers = Object.values(users).map(({ password, ...user }) => user);
+  await page.route(/\/api\/user\?/, async (route) => {
+    const url = new URL(route.request().url());
+    const name = (url.searchParams.get('name') || '*').replace(/\*/g, '').toLowerCase();
+    const filteredUsers = listedUsers.filter((user) => (user.name || '').toLowerCase().includes(name));
+    await route.fulfill({ json: { users: filteredUsers, more: false } });
+  });
+  await page.route(/\/api\/user\/\d+$/, async (route) => {
+    if (route.request().method() === 'DELETE') {
+      const id = new URL(route.request().url()).pathname.split('/').pop() || '';
+      listedUsers = listedUsers.filter((user) => user.id !== id);
+      await route.fulfill({ json: { message: 'user deleted' } });
+      return;
+    }
+    await route.fallback();
+  });
+
   await page.route('*/**/api/order/menu', async (route) => {
     await route.fulfill({
       json: [
@@ -311,6 +342,34 @@ test('diner dashboard', async ({ page }) => {
   await expect(page.locator('tbody')).toContainText('23');
 });
 
+test('diner can update their profile', async ({ page }) => {
+  await basicInit(page);
+
+  await page.getByRole('link', { name: 'Login' }).click();
+  await page.getByPlaceholder('Email address').fill('d@jwt.com');
+  await page.getByPlaceholder('Password').fill('a');
+  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByRole('link', { name: 'KC' }).click();
+
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('textbox', { name: 'Full name' }).fill('Kai Updated');
+  await page.getByRole('textbox', { name: 'Email address' }).fill('kai-updated@jwt.com');
+  await page.getByRole('textbox', { name: 'Password' }).fill('updated-password');
+  await page.getByRole('button', { name: 'Update' }).click();
+
+  await expect(page.getByRole('main')).toContainText('Kai Updated');
+  await expect(page.getByRole('main')).toContainText('kai-updated@jwt.com');
+
+  await page.getByRole('link', { name: 'Logout' }).click();
+  await page.getByRole('link', { name: 'Login' }).click();
+  await page.getByPlaceholder('Email address').fill('kai-updated@jwt.com');
+  await page.getByPlaceholder('Password').fill('updated-password');
+  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByRole('link', { name: 'KU' }).click();
+  await expect(page.getByRole('main')).toContainText('Kai Updated');
+});
+
 test('franchise dashboard', async ({ page }) => {
   await basicInit(page);
 
@@ -340,4 +399,22 @@ test('admin dashboard', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: "Mama Ricci's kitchen" })).toBeVisible();
   await expect(page.getByText('LotaPizza')).toBeVisible();
+});
+
+test('admin can list, filter, and delete users', async ({ page }) => {
+  await basicInit(page);
+
+  await page.getByRole('link', { name: 'Login' }).click();
+  await page.getByPlaceholder('Email address').fill('admin@jwt.com');
+  await page.getByPlaceholder('Password').fill('a');
+  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByRole('link', { name: 'Admin' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
+  await expect(page.getByRole('row', { name: /Kai Chen/ })).toContainText('d@jwt.com');
+  await page.getByPlaceholder('Filter users').fill('Kai');
+  await page.getByRole('button', { name: 'Search users' }).click();
+  await expect(page.getByRole('row', { name: /Kai Chen/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete Kai Chen' }).click();
+  await expect(page.getByRole('row', { name: /Kai Chen/ })).toHaveCount(0);
 });

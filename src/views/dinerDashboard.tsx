@@ -3,14 +3,32 @@ import { Link } from 'react-router-dom';
 import View from './view';
 import { pizzaService } from '../service/service';
 import { Order, OrderHistory, Role, User } from '../service/pizzaService';
+import Button from '../components/button';
 
 interface Props {
   user: User | null;
+  setUser: (user: User) => void;
 }
 
 export default function DinerDashboard(props: Props) {
   const user = props.user || ({} as User);
   const [orders, setOrders] = React.useState<Order[]>([]);
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [name, setName] = React.useState(user.name || '');
+  const [email, setEmail] = React.useState(user.email || '');
+  const [password, setPassword] = React.useState('');
+
+  React.useEffect(() => {
+    setName(user.name || '');
+    setEmail(user.email || '');
+  }, [user]);
+
+  async function updateProfile() {
+    const updatedUser = await pizzaService.updateUser({ ...user, name, email, password: password || undefined });
+    props.setUser(updatedUser);
+    setPassword('');
+    setEditOpen(false);
+  }
 
   React.useEffect(() => {
     (async () => {
@@ -35,6 +53,7 @@ export default function DinerDashboard(props: Props) {
         <div className="hs-tooltip inline-block">
           <img className="hs-tooltip-toggle relative inline-block size-[96px] rounded-full ring-2 ring-white hover:z-10" src="https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=facearea&facepad=2&w=300&h=300&q=80" alt="Employee stock photo" />
         </div>
+        <Button title="Edit" className="w-16 p-0" onPress={() => setEditOpen(true)} />
 
         <div className="my-4 text-lg text-orange-200 text-start grid grid-cols-5 gap-2">
           <div className="font-semibold text-orange-400">name:</div> <div className="col-span-4">{user.name}</div>
@@ -97,6 +116,24 @@ export default function DinerDashboard(props: Props) {
               </div>
             </div>
           </>
+        )}
+        {editOpen && (
+          <div role="dialog" aria-modal="true" aria-labelledby="edit-user-title" className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-8">
+            <div className="w-full max-w-lg rounded-xl bg-white text-gray-800 shadow-lg">
+              <div className="flex items-center justify-between border-b bg-slate-200 px-4 py-3">
+                <h3 id="edit-user-title" className="font-bold">Edit user</h3>
+                <button type="button" aria-label="Close" onClick={() => setEditOpen(false)}>×</button>
+              </div>
+              <div className="grid gap-4 p-4">
+                <label className="grid gap-1">Full name<input className="rounded border px-3 py-2" value={name} onChange={(event) => setName(event.target.value)} /></label>
+                <label className="grid gap-1">Email address<input type="email" className="rounded border px-3 py-2" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+                <label className="grid gap-1">Password<input type="password" className="rounded border px-3 py-2" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+              </div>
+              <div className="flex justify-end border-t bg-slate-200 px-4 py-3">
+                <Button title="Update" onPress={updateProfile} />
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </View>
