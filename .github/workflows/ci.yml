@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build and Test
@@ -53,22 +56,36 @@ jobs:
           npm run build
           cp dist/index.html dist/404.html
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: jwt-pizza-dist
           path: dist/
 
   deploy:
+    name: Deploy to S3 and CloudFront
     needs: build
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: jwt-pizza-dist
+          path: dist/
+
+      - name: Create OIDC token to AWS
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          audience: sts.amazonaws.com
+          aws-region: us-east-1
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT }}:role/${{ secrets.CI_IAM_ROLE }}
+
+      - name: Push to AWS S3
+        run: aws s3 cp dist/ s3://${{ secrets.APP_BUCKET }}/ --recursive
+
+      - name: Invalidate CloudFront cache
+        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.DISTRIBUTION_ID }} --paths "/*"
