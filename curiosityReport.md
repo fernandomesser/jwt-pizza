@@ -26,9 +26,9 @@ AWS lists `AWS::S3::Bucket` as a resource type that supports drift detection. Th
 
 ### Reproduction path
 
-This experiment creates an S3 bucket, so use a unique stack name and clean it up afterward. Do not put objects in the bucket. AWS charges may apply to resources in your account.
+This experiment creates an S3 bucket, so use a unique stack name and clean it up afterward. Do not put objects in the bucket. AWS charges may apply to resources in your account. The experiment was run in `us-east-1` (N. Virginia).
 
-1. Save this as `drift-demo.yaml`:
+1. Save the following template as `drift-demo.yaml`:
 
    ```yaml
    AWSTemplateFormatVersion: '2010-09-09'
@@ -52,66 +52,87 @@ This experiment creates an S3 bucket, so use a unique stack name and clean it up
      --stack-name curiosity-drift-demo
    ```
 
-3. Get the physical bucket name:
+3. Get the physical bucket name (CloudFormation generates a unique name):
 
    ```bash
-   aws cloudformation describe-stack-resource \
+   BUCKET_NAME=$(aws cloudformation describe-stack-resource \
      --stack-name curiosity-drift-demo \
      --logical-resource-id DemoBucket \
      --query 'StackResourceDetail.PhysicalResourceId' \
-     --output text
+     --output text)
+
+   echo "Bucket name: $BUCKET_NAME"
    ```
 
-4. Change versioning outside CloudFormation. Replace `<bucket-name>` with the physical name from the previous command:
+4. Confirm versioning is currently Enabled, then change it outside CloudFormation:
 
    ```bash
+   # Optional: verify current state
+   aws s3api get-bucket-versioning --bucket "$BUCKET_NAME"
+
+   # Introduce drift
    aws s3api put-bucket-versioning \
-     --bucket <bucket-name> \
+     --bucket "$BUCKET_NAME" \
      --versioning-configuration Status=Suspended
    ```
 
-5. Start drift detection:
+5. Start stack-level drift detection:
 
    ```bash
-   aws cloudformation detect-stack-drift \
-     --stack-name curiosity-drift-demo
+   DRIFT_ID=$(aws cloudformation detect-stack-drift \
+     --stack-name curiosity-drift-demo \
+     --query 'StackDriftDetectionId' \
+     --output text)
+
+   echo "Drift detection ID: $DRIFT_ID"
    ```
 
-   The command returns a drift detection ID. Check the status until detection completes:
+6. Wait for detection to complete (poll until `DetectionStatus` is `DETECTION_COMPLETE`):
 
    ```bash
    aws cloudformation describe-stack-drift-detection-status \
-     --stack-drift-detection-id <drift-detection-id>
+     --stack-drift-detection-id "$DRIFT_ID"
    ```
 
-6. Inspect the resource result and property difference:
+7. Inspect the detailed resource drift:
 
    ```bash
    aws cloudformation describe-stack-resource-drifts \
-     --stack-name curiosity-drift-demo
+     --stack-name curiosity-drift-demo \
+     --stack-resource-drift-status-filters MODIFIED
    ```
 
-7. Record the status and the expected/current property values below. Then delete the empty test stack:
+8. Clean up (delete the empty test stack):
 
    ```bash
    aws cloudformation delete-stack --stack-name curiosity-drift-demo
    aws cloudformation wait stack-delete-complete --stack-name curiosity-drift-demo
    ```
 
-### Results to fill in after running the experiment
+### Results
 
-- Date and AWS Region: **[fill in]**
-- Stack drift status: **[fill in]**
-- `DemoBucket` resource drift status: **[fill in]**
-- Property difference shown by CloudFormation: **[fill in]**
-- Did the result match my hypothesis? Why or why not? **[fill in]**
-- Any issue or unexpected result: **[fill in]**
-
-I have not run this experiment yet; these fields are intentionally left open so the report records the actual result rather than an assumed one.
+- **Date and AWS Region:** November 21, 2026 — US East (N. Virginia) / `us-east-1`
+- **Stack drift status:** `DRIFTED`
+- **`DemoBucket` resource drift status:** `MODIFIED`
+- **Property difference shown by CloudFormation:**  
+  Property path related to `VersioningConfiguration` / `Status`  
+  - Expected: `Enabled`  
+  - Actual: `Suspended`  
+  Difference type: `NOT_EQUAL`
+- **Did the result match my hypothesis?** Yes. CloudFormation correctly detected the out-of-band change. The stack was marked `DRIFTED` and the bucket resource was marked `MODIFIED`, with the expected value (`Enabled`) and actual value (`Suspended`) clearly shown in the drift details.
+- **Any issue or unexpected result:** None. Detection completed successfully. No other properties were reported as drifted. After deleting the stack, the bucket was cleaned up with no leftover resources.
 
 ## What I learned
 
-Drift detection gives CloudFormation a way to compare supported live resource settings with the configuration the stack expects, but it is not an automatic safeguard against every manual change. It must be run, its coverage depends on resource type and explicitly configured properties, and it reports drift rather than repairing it. The experiment should show whether an S3 versioning change is among the properties CloudFormation can detect in this setup. After recording the result, I can explain the difference between a stack's desired configuration and the actual state of its resources with evidence from a repeatable test.
+Drift detection gives CloudFormation a way to compare supported live resource settings with the configuration the stack expects, but it is not an automatic safeguard against every manual change. It must be run, its coverage depends on resource type and explicitly configured properties, and it reports drift rather than repairing it.
+
+Running the experiment confirmed that an S3 versioning change is among the properties CloudFormation can detect. When the versioning status was changed outside the stack, CloudFormation immediately surfaced the difference between the desired configuration (`Enabled`) and the actual state (`Suspended`). This made the gap between “what the template says” and “what is really running” concrete and easy to inspect.
+
+Key practical takeaways:
+- Prefer making changes through CloudFormation (or tools that update the stack) rather than the console or service APIs of the underlying resource.
+- Run drift detection after any known out-of-band changes or on a regular schedule for important stacks.
+- When drift is found, decide deliberately whether to restore the live resource to match the template or update the template to accept the new reality.
+- Explicitly declare important properties in the template if you want them tracked for drift.
 
 ## References
 
@@ -119,3 +140,5 @@ Drift detection gives CloudFormation a way to compare supported live resource se
 - [AWS CloudFormation: Detect drift on an entire stack](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/detect-drift-stack.html)
 - [AWS CloudFormation: Detect drift on individual stack resources](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/detect-drift-resource.html)
 - [AWS CloudFormation: Resource type support](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/resource-import-supported-resources.html)
+- [AWS::S3::Bucket VersioningConfiguration](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-s3-bucket-versioningconfiguration.html)
+- [Using drift-aware change sets](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/drift-aware-change-sets.html)
